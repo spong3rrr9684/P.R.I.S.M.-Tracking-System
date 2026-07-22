@@ -43,28 +43,35 @@ P.R.I.S.M. is a highly modular, real-time computer vision pipeline that overlays
 | `f` | Reset to Full Screen |
 | `q` | Quit |
 
-## ⚙️ Detailed Installation Guide
+## ⚙️ Installation Guide
 
-### Step 1: Install Python Dependencies
-Open your terminal and install the required Python libraries:
+### Option A: The One-Click Auto Installer (Windows Only)
+If you are on Windows, simply double-click the **`RUN_PRISM.bat`** file. 
+It will automatically verify Python, install all pip dependencies, download the massive Google MediaPipe `.task` models into your folder, and launch the HUD. You don't have to touch a terminal!
+
+---
+
+### Option B: Manual Installation (Mac / Linux / Advanced Users)
+
+**Step 1: Install Python Dependencies**
 ```bash
 pip install opencv-python numpy mediapipe mss psutil pyvirtualcam SpeechRecognition pyttsx3 sounddevice
 ```
 
-### Step 2: Download the AI Models
+**Step 2: Download the AI Models**
 P.R.I.S.M uses Google's MediaPipe machine learning models. You **MUST** download these 4 files and place them directly inside the `face_tracker` folder next to `main.py`.
 * [face_landmarker.task](https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task)
 * [hand_landmarker.task](https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task)
 * [pose_landmarker_full.task](https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task)
 * [selfie_segmenter.task](https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.task)
 
-### Step 3: Setup Virtual Camera (Optional but Recommended)
+**Step 3: Setup Virtual Camera (Optional but Recommended)**
 To stream the HUD directly into Discord, Zoom, or Twitch, the script uses a virtual webcam.
 1. Download and install [OBS Studio](https://obsproject.com/).
 2. Open OBS Studio and click **"Start Virtual Camera"** at least once to initialize the driver on your system.
 *(If you do not want to use a virtual camera, you can safely ignore any `pyvirtualcam` warnings in the terminal; the local OpenCV preview window will still work perfectly).*
 
-### Step 4: Run the System
+**Step 4: Run the System**
 ```bash
 python main.py
 ```
