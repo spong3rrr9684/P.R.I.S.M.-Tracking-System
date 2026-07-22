@@ -12,7 +12,6 @@ import cv2
 import numpy as np
 import math
 import psutil
-import pyautogui
 import time
 import time as _t
 import threading
@@ -183,14 +182,12 @@ def render_hand_tracking(overlay, hand_landmarks_list, hand_handedness_list, w, 
             if (dist<18).any(): cv2.polylines(overlay,ep[dist<18],False,G,1,cv2.LINE_AA)
             if (dist< 4).any(): cv2.polylines(overlay,ep[dist< 4],False,W,1,cv2.LINE_AA)
             # Palm arc reactor: 3 concentric rings + 6 rotating spokes (cheap)
-            px,py=palm
             for rf in [0.20,0.12,0.06]:
-                cv2.circle(overlay,(px,py),int(scale*rf),A,1,cv2.LINE_AA)
+                pass
             for i in range(6):
                 a = t*2.5 + i*math.pi/3
                 rx=px+int(math.cos(a)*scale*0.15); ry=py+int(math.sin(a)*scale*0.15)
                 cv2.circle(overlay,(rx,ry),2,G,-1,cv2.LINE_AA)
-            cv2.circle(overlay,(px,py),3,W,-1,cv2.LINE_AA)
             # Fingertip repulsor rings
             pulse=abs(math.sin(t*6))
             for ti in [4,8,12,16,20]:
@@ -324,7 +321,6 @@ def render_hand_tracking(overlay, hand_landmarks_list, hand_handedness_list, w, 
                 cv2.line(overlay, (tx2, ty2 + 6), (tx2, min(drop_y, ty2 + drop_len)), LIME, 1, cv2.LINE_AA)
             
             # ── Layer 5: Palm hacking sigil (rotating geometry) ───────────
-            px, py = palm
             # Outer rotating square
             sq_r  = int(scale * 0.22)
             angle = t * 1.2
@@ -347,8 +343,6 @@ def render_hand_tracking(overlay, hand_landmarks_list, hand_handedness_list, w, 
             
             # Center pulse dot
             center_r = max(2, int(3 + pulse * 3))
-            cv2.circle(overlay, (px, py), center_r, WHITE, -1, cv2.LINE_AA)
-            cv2.circle(overlay, (px, py), center_r + 3, LIME, 1, cv2.LINE_AA)
             
             # ── Layer 6: All joint nodes with data node style ────────────
             for i, (nx, ny) in enumerate(pts):
@@ -383,9 +377,6 @@ def render_hand_tracking(overlay, hand_landmarks_list, hand_handedness_list, w, 
                 cv2.circle(overlay,(tx2,ty2),11,W,1,cv2.LINE_AA)
                 cv2.line(overlay,(tx2-16,ty2),(tx2+16,ty2),W,1,cv2.LINE_AA)
                 cv2.line(overlay,(tx2,ty2-11),(tx2,ty2+11),W,1,cv2.LINE_AA)
-            px,py=palm
-            cv2.circle(overlay,(px,py),int(scale*0.18),I,1,cv2.LINE_AA)
-            cv2.circle(overlay,(px,py),3,W,-1,cv2.LINE_AA)
             draw_hud_brackets(overlay,hmin_x,hmin_y,hmax_x,hmax_y,W,1)
             cv2.putText(overlay,f"SURGICAL [{hdn}]",(hmin_x,hmin_y-10),cv2.FONT_HERSHEY_SIMPLEX,0.36,W,1,cv2.LINE_AA)
 
@@ -403,10 +394,6 @@ def render_hand_tracking(overlay, hand_landmarks_list, hand_handedness_list, w, 
                     cv2.circle(overlay,(nx,ny),3,Y,-1,cv2.LINE_AA)
                 else:
                     cv2.circle(overlay,(nx,ny),2,R,-1,cv2.LINE_AA)
-            px,py=palm
-            cv2.circle(overlay,(px,py),int(scale*0.22),R,1,cv2.LINE_AA)
-            cv2.circle(overlay,(px,py),int(scale*0.11+pulse*5),O,1,cv2.LINE_AA)
-            cv2.circle(overlay,(px,py),4,Y,-1,cv2.LINE_AA)
             draw_hud_brackets(overlay,hmin_x,hmin_y,hmax_x,hmax_y,R,2)
             cv2.putText(overlay,f"THERMAL [{hdn}]",(hmin_x,hmin_y-10),cv2.FONT_HERSHEY_SIMPLEX,0.36,O,1,cv2.LINE_AA)
 
@@ -418,17 +405,14 @@ def render_hand_tracking(overlay, hand_landmarks_list, hand_handedness_list, w, 
             for i,(nx,ny) in enumerate(pts):
                 cv2.circle(overlay,(nx,ny),4 if i in[4,8,12,16,20] else 2,
                            V if i in[4,8,12,16,20] else P,-1,cv2.LINE_AA)
-            px,py=palm
             for ring in range(3):
                 phase=(t*2.2+ring*0.35)%1.0
                 rad=max(1,int(phase*scale*0.55))
                 alpha=int(210*(1.0-phase))
-                cv2.circle(overlay,(px,py),rad,(alpha//2,0,alpha),1,cv2.LINE_AA)
             for ti in [4,8,12,16,20]:
                 tx2,ty2=pts[ti]
                 cv2.circle(overlay,(tx2,ty2),6,V,1,cv2.LINE_AA)
                 cv2.line(overlay,(px,py),(tx2,ty2),(50,5,50),1,cv2.LINE_AA)
-            cv2.circle(overlay,(px,py),4,W,-1,cv2.LINE_AA)
             draw_hud_brackets(overlay,hmin_x,hmin_y,hmax_x,hmax_y,V,2)
             cv2.putText(overlay,f"NEURAL VOID [{hdn}]",(hmin_x,hmin_y-10),cv2.FONT_HERSHEY_SIMPLEX,0.36,V,1,cv2.LINE_AA)
 
@@ -674,9 +658,7 @@ def draw_full_hud(image, face_landmarks_list, hand_landmarks_list, hand_handedne
         draw_radar_sweep(overlay, h, t)
         
 
-    # Skip Button
-    skip_x, skip_y, skip_w, skip_h = 8, int(h * 0.38) - 65, 168, 50
-    skip_color = (30, 30, 200) # Red
+
     
     # Nanotech Suit Up Button
     CYAN_DIM = (140, 140, 0)
@@ -687,22 +669,6 @@ def draw_full_hud(image, face_landmarks_list, hand_landmarks_list, hand_handedne
     for hl in hand_landmarks_list:
         ix, iy = int(hl[8].x * w), int(hl[8].y * h)
 
-        # Check Skip Button
-        if state.skip_button_enabled and skip_x < ix < skip_x + skip_w and skip_y < iy < skip_y + skip_h:
-            skip_color = (100, 100, 255) # Bright Red
-            if t - state.last_skip_time > 1.5: # 1.5 second cooldown so it doesn't spam skip
-                state.last_skip_time = t
-                
-                def _do_skip():
-                    try:
-                        pyautogui.click()
-                        time.sleep(0.1)
-                        pyautogui.click()
-                        print("[AUTO-SKIP] Double-clicked mouse at current position!")
-                    except Exception as e:
-                        print(f"Failed to skip: {e}")
-                        
-                threading.Thread(target=_do_skip, daemon=True).start()
         
         # Check Nanotech Deploy
         if nano_x < ix < nano_x + nano_w and nano_y < iy < nano_y + nano_h:
@@ -717,33 +683,7 @@ def draw_full_hud(image, face_landmarks_list, hand_landmarks_list, hand_handedne
                     state.suit_up_complete = False
                     state.deploy_y = 0
                 state.deploy_start_time = t
-                
-
     
-    # Premium Skip Button Design (only if enabled)
-    if state.skip_button_enabled:
-        is_skipping = (t - state.last_skip_time < 0.5)
-        bg_col = (40, 40, 200) if is_skipping else (10, 10, 30)
-        border_col = (100, 100, 255) if is_skipping else (40, 40, 180)
-        text_col = (255, 255, 255)
-        
-        # Base fill and border
-        cv2.rectangle(overlay, (skip_x, skip_y), (skip_x + skip_w, skip_y + skip_h), bg_col, -1)
-        cv2.rectangle(overlay, (skip_x, skip_y), (skip_x + skip_w, skip_y + skip_h), border_col, 2)
-        # Top accent bar
-        cv2.rectangle(overlay, (skip_x, skip_y), (skip_x + skip_w, skip_y + 3), (100, 100, 255), -1)
-        
-        # Hazard stripes
-        for i in range(5):
-            sx = skip_x + skip_w - 30 + (i * 6)
-            cv2.line(overlay, (sx, skip_y + 8), (sx - 12, skip_y + skip_h - 8), border_col, 2, cv2.LINE_AA)
-            
-        # Main text
-        skip_text = "[X] SKIPPING..." if is_skipping else ">> SKIP TARGET"
-        cv2.putText(overlay, skip_text, (skip_x + 12, skip_y + 24), cv2.FONT_HERSHEY_SIMPLEX, 0.45, text_col, 1, cv2.LINE_AA)
-        # Subtext
-        subtext = "INITIATE OVERRIDE" if is_skipping else "ENGAGE TO BYPASS"
-        cv2.putText(overlay, subtext, (skip_x + 12, skip_y + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.3, border_col, 1, cv2.LINE_AA)
     
     cv2.rectangle(overlay, (nano_x, nano_y), (nano_x + nano_w, nano_y + nano_h), nano_color, 2)
     cv2.putText(overlay, f"SUIT UP [N]", (nano_x + 15, nano_y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, nano_color, 1, cv2.LINE_AA)

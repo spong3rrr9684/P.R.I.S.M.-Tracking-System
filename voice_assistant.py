@@ -217,10 +217,6 @@ class VoiceAssistant:
                     break
         elif any(w in text for w in ["hide data", "hide hud", "clear screen"]):
             cmd = "toggle_hud"
-        elif any(w in text for w in ["disable skip", "hide skip", "remove skip"]):
-            cmd = "skip_off"
-        elif any(w in text for w in ["enable skip", "show skip"]):
-            cmd = "skip_on"
         
         if cmd:
             print(f"[VOICE] Command triggered: {cmd} from '{text}'")
@@ -244,8 +240,6 @@ class VoiceAssistant:
                 self.speak("Switching HUD interface.")
             elif cmd == "toggle_hud":
                 self.speak("Toggling telemetry.")
-            elif cmd in ["skip_on", "skip_off"]:
-                self.speak("Updating skip protocol.")
                 
             # Go back to sleep after executing a command
             self.awake_until = 0

@@ -280,9 +280,6 @@ def main():
                 elif key == ord('b'):
                     state.gesture_calibration_mode = not state.gesture_calibration_mode
                     print(f"[CALIBRATION] Gesture Calibration Mode: {'ON' if state.gesture_calibration_mode else 'OFF'}")
-                elif key == ord('k'):
-                    state.skip_button_enabled = not state.skip_button_enabled
-                    print(f"[SKIP BUTTON] {'ENABLED' if state.skip_button_enabled else 'DISABLED'}")
                 elif key == ord('i'):
                     state.bg_frame = image.copy()
                     state.invis_mode = not state.invis_mode
@@ -310,10 +307,6 @@ def main():
                                 state.suit_up_complete = False
                                 state.deploy_y = 0
                             state.deploy_start_time = time.time()
-                        elif cmd == "skip_off":
-                            state.skip_button_enabled = False
-                        elif cmd == "skip_on":
-                            state.skip_button_enabled = True
                 elif key == ord('c'):
                     ws_server.stop()
                     cap.release()

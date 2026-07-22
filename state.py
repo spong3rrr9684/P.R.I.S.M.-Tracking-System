@@ -19,7 +19,6 @@ class HUDState:
     bg_frame: Any = None
     is_file_network_open: bool = False
     fingers_touching: bool = False
-    skip_button_enabled: bool = True
     last_pinch_time: float = 0
     last_box_coords: Any = None
     was_pinching: bool = False
@@ -30,7 +29,6 @@ class HUDState:
     stretch_factor: float = 1.0
     zoom_factor: float = 0.75
     gesture_calibration_mode: bool = False
-    last_skip_time: float = 0
     air_draw_points: List[Any] = field(default_factory=list)
     is_drawing: bool = False
     
