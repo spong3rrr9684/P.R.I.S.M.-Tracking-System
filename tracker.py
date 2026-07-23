@@ -166,7 +166,7 @@ def start_inference_thread(state, frame_q, result_q):
         min_tracking_confidence=0.6)
 
     pose_options = vision.PoseLandmarkerOptions(
-        base_options=python.BaseOptions(model_asset_path=os.path.join(script_dir, 'pose_landmarker_lite.task')),
+        base_options=python.BaseOptions(model_asset_path=os.path.join(script_dir, 'pose_landmarker_full.task')),
         num_poses=1,
         running_mode=VisionTaskRunningMode.VIDEO,
         min_pose_detection_confidence=0.6,

@@ -74,12 +74,87 @@ class ThreadedCamera:
         self.running = False
         if hasattr(self, 'thread'):
             self.thread.join(timeout=1.0)
-        self.cap.release()
+        self.source_mgr.release()
+
+class ThreadedScreenCapture:
+    def __init__(self, bbox=None):
+        import mss
+        self.sct = mss.mss()
+        self.bbox = bbox if bbox else self.sct.monitors[0]
+        self.running = True
+        self.ret = False
+        self.frame = None
+        self.thread = threading.Thread(target=self.update, daemon=True)
+        self.thread.start()
+        
+    def update(self):
+        import time
+        import numpy as np
+        while self.running:
+            try:
+                sct_img = self.sct.grab(self.bbox)
+                self.frame = np.array(sct_img)[:, :, :3]
+                self.ret = True
+            except Exception:
+                self.ret = False
+            time.sleep(1/30.0)
+            
+    def read(self):
+        return self.ret, (self.frame.copy() if self.frame is not None else None)
+        
+    def isOpened(self):
+        return self.running
+        
+    def release(self):
+        self.running = False
+        if hasattr(self, 'thread'):
+            self.thread.join(timeout=1.0)
+
+class VideoSourceManager:
+    def __init__(self, primary_cam_idx):
+        self.source = ThreadedCamera(primary=primary_cam_idx)
+        self.mode = "WEBCAM"
+        self.window_list = []
+        self.window_idx = 0
+        
+    def switch_to_desktop(self):
+        self.source.release()
+        self.source = ThreadedScreenCapture(bbox=None)
+        self.mode = "DESKTOP"
+        print("[SOURCE] Switched to Full Desktop")
+        
+    def switch_to_window(self):
+        self.source.release()
+        from utils import get_open_windows
+        self.window_list = get_open_windows()
+        if len(self.window_list) > 0:
+            self.window_idx = (self.window_idx + 1) % len(self.window_list)
+            win = self.window_list[self.window_idx]
+            self.source = ThreadedScreenCapture(bbox=win['bbox'])
+            self.mode = f"WINDOW: {win['title'][:15]}"
+            print(f"[SOURCE] Switched to Window: {win['title']}")
+        else:
+            self.switch_to_desktop()
+            
+    def switch_to_webcam(self, idx=0):
+        self.source.release()
+        self.source = ThreadedCamera(primary=idx)
+        self.mode = "WEBCAM"
+        print("[SOURCE] Switched to Webcam")
+        
+    def read(self):
+        return self.source.read()
+        
+    def isOpened(self):
+        return self.source.isOpened()
+        
+    def release(self):
+        self.source.release()
 
 from state import HUDState
 from tracker import start_inference_thread
 from renderer import draw_full_hud
-from utils import apply_tracking_smoothing, get_browser_rect
+from utils import apply_tracking_smoothing, get_target_window_rect
 import pyvirtualcam
 import numpy as np
 
@@ -96,17 +171,27 @@ def main():
     result_q = queue.Queue(maxsize=1)
     sct_instance = mss.mss()
 
+    class DummyCam:
+        def __init__(self, *args, **kwargs): pass
+        def __enter__(self): 
+            self.device = "DISABLED (OBS Virtual Camera not found)"
+            return self
+        def __exit__(self, *args): pass
+        def send(self, frame): pass
+        def sleep_until_next_frame(self): time.sleep(1/30.0)
+
     face_det, hand_det, pose_det, infer_thread = start_inference_thread(state, frame_q, result_q)
 
-    cap = ThreadedCamera(target_width=1280, target_height=720)
-    if not cap.isOpened():
+    source_mgr = VideoSourceManager(primary_cam_idx=2)
+    if not source_mgr.isOpened():
+        print("[CRITICAL ERROR] No webcam detected! Please plug in a camera.")
         return
-    cam_index = cap.cam_index
+    cam_index = 2
 
     while True:
         raw_width, raw_height = 1280, 720
         for _ in range(50):
-            success, test_frame = cap.read()
+            success, test_frame = source_mgr.read()
             if success:
                 raw_height, raw_width = test_frame.shape[:2]
                 break
@@ -118,7 +203,14 @@ def main():
         canvas_h = raw_height
 
         # Initialize pyvirtualcam with RGB pixel format
-        with pyvirtualcam.Camera(width=canvas_w, height=canvas_h, fps=30, fmt=pyvirtualcam.PixelFormat.RGB) as cam:
+        try:
+            cam_context = pyvirtualcam.Camera(width=canvas_w, height=canvas_h, fps=30, fmt=pyvirtualcam.PixelFormat.RGB)
+        except Exception as e:
+            print(f"\n[WARNING] Could not start virtual camera: {e}")
+            print("[WARNING] P.R.I.S.M will run locally, but will not stream to Discord/Zoom.\n")
+            cam_context = DummyCam()
+
+        with cam_context as cam:
             print(f'Virtual camera active: {cam.device}. Resolution: {canvas_w}x{canvas_h}')
             
 
@@ -135,9 +227,9 @@ def main():
             last_handed = []
             last_pose   = []
 
-            while cap.isOpened():
+            while source_mgr.isOpened():
                 try:
-                    success, image = cap.read()
+                    success, image = source_mgr.read()
                 except Exception as e:
                     logger.error(f"Failed to read from camera: {e}", exc_info=True)
                     success = False
@@ -241,6 +333,7 @@ def main():
                     return # Exit the entire program
                 elif key == ord('m'):
                     state.face_mesh_mode = (state.face_mesh_mode + 1) % 6
+
                 elif key == ord('h'):
                     state.show_side_panels = not state.show_side_panels
                 elif key == ord('v'):
@@ -309,7 +402,7 @@ def main():
                             state.deploy_start_time = time.time()
                 elif key == ord('c'):
                     ws_server.stop()
-                    cap.release()
+                    source_mgr.release()
                     cam_index = (cam_index + 1) % 10
                     cap = cv2.VideoCapture(cam_index)
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -322,10 +415,16 @@ def main():
                     state.crop_rect = None
                     print("[CALIBRATION] Restored to Full Window")
                 elif key == ord('s'):
-                    print('\n[CALIBRATION MODE]')
-                    bbox = get_browser_rect()
-                    if bbox is None:
-                        bbox = sct_instance.monitors[0] # Capture ALL monitors as fallback
+                    state.target_window_index += 1
+                    bbox, title, count = get_target_window_rect(state.target_window_index)
+                    
+                    if bbox is None or state.target_window_index >= count:
+                        state.target_window_index = -1
+                        bbox = sct_instance.monitors[0]
+                        print("\n[SCREEN CROP] Targeting: Full Desktop Monitor")
+                    else:
+                        print(f"\n[SCREEN CROP] Targeting Window ({state.target_window_index+1}/{count}): {title}")
+
                     sct_img = sct_instance.grab(bbox)
                     calib_img = cv2.cvtColor(np.array(sct_img), cv2.COLOR_BGRA2BGR)
                     r = cv2.selectROI('Select Video Feed (Press ENTER)', calib_img, False, False)
