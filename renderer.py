@@ -333,8 +333,10 @@ def render_hand_tracking(overlay, hand_landmarks_list, hand_handedness_list, w, 
         ep   = pts[_hand_edges]              # edge pairs (N,2,2)
 
         wrist= pts[0];  palm=pts[9]
+        px, py = palm
 
         scale= float(np.linalg.norm(palm-wrist))+1e-6
+        px, py = palm
 
         hull = cv2.convexHull(pts)
 
@@ -364,7 +366,6 @@ def render_hand_tracking(overlay, hand_landmarks_list, hand_handedness_list, w, 
 
             # Palm arc reactor: 3 concentric rings + 6 rotating spokes (cheap)
 
-            px, py = palm
             for rf in [0.20,0.12,0.06]:
 
                 pass
