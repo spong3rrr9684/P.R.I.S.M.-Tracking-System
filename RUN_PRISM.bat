@@ -20,7 +20,7 @@ IF %ERRORLEVEL% NEQ 0 (
 )
 
 echo [1/3] Installing and Updating Python Dependencies...
-pip install opencv-python numpy mediapipe mss psutil pyvirtualcam SpeechRecognition pyttsx3 sounddevice
+pip install opencv-python numpy mediapipe mss psutil pyvirtualcam SpeechRecognition pyttsx3 sounddevice PyAudio
 echo.
 
 echo [2/3] Checking for AI Neural Network Models...
