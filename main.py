@@ -161,11 +161,11 @@ import numpy as np
 def main():
     print('=' * 50)
     print('  P.R.I.S.M TRACKING SYSTEM v4.0 (Modular)')
-    print('=' * 50)
-    print('  [c] Cycle camera  |  [m] Change Face Mode  |  [h] Toggle HUD Data')
-    print('  [t] Toggle Target | [s] Set Screen Crop | [f] Full Screen | [q] Quit')
-    print('=' * 50)
-
+    print("==================================================")
+    print("  [c] Cycle camera  |  [m] Change Face Mode  |  [h] Toggle HUD Data")
+    print("  [w] Cycle Window  |  [s] Set Screen Crop   |  [f] Full Screen ")
+    print("  [t] Toggle Target |  [q] Quit")
+    print("==================================================")
     state = HUDState()
     frame_q = queue.Queue(maxsize=1)
     result_q = queue.Queue(maxsize=1)
@@ -414,8 +414,15 @@ def main():
                 elif key == ord('f'):
                     state.crop_rect = None
                     print("[CALIBRATION] Restored to Full Window")
-                elif key == ord('s'):
+                elif key == ord('w'):
                     state.target_window_index += 1
+                    bbox, title, count = get_target_window_rect(state.target_window_index)
+                    if bbox is None or state.target_window_index >= count:
+                        state.target_window_index = -1
+                        print("\n[TARGET WINDOW] Switched to: Full Desktop Monitor")
+                    else:
+                        print(f"\n[TARGET WINDOW] Switched to ({state.target_window_index+1}/{count}): {title}")
+                elif key == ord('s'):
                     bbox, title, count = get_target_window_rect(state.target_window_index)
                     
                     if bbox is None or state.target_window_index >= count:
