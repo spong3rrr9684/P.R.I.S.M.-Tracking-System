@@ -28,7 +28,7 @@ class HUDState:
     # Custom calibration tweaks
     ai_scale_factor: float = 0.35
     stretch_factor: float = 1.0
-    zoom_factor: float = 0.75
+    zoom_factor: float = 1.0
     gesture_calibration_mode: bool = False
     air_draw_points: List[Any] = field(default_factory=list)
     is_drawing: bool = False
