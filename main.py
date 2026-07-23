@@ -154,7 +154,7 @@ class VideoSourceManager:
 from state import HUDState
 from tracker import start_inference_thread
 from renderer import draw_full_hud
-from utils import apply_tracking_smoothing, get_target_window_rect
+from utils import apply_tracking_smoothing, get_target_window_rect, load_settings, save_settings
 import pyvirtualcam
 import numpy as np
 
@@ -167,6 +167,7 @@ def main():
     print("  [t] Toggle Target |  [q] Quit")
     print("==================================================")
     state = HUDState()
+    load_settings(state)
     frame_q = queue.Queue(maxsize=1)
     result_q = queue.Queue(maxsize=1)
     sct_instance = mss.mss()
@@ -198,9 +199,10 @@ def main():
             time.sleep(0.05)
             
         # VIRTUAL CAMERA INITIALIZATION:
-        # Dynamic Resolution based on actual camera output
-        canvas_w = raw_width
-        canvas_h = raw_height
+        # Force a standard 16:9 Landscape Aspect Ratio (1280x720) 
+        # so web browsers (Umingle/Omegle) never squish the video feed.
+        canvas_w = 1280
+        canvas_h = 720
 
         # Initialize pyvirtualcam with RGB pixel format
         try:
@@ -304,7 +306,8 @@ def main():
                     # === DYNAMIC CALIBRATION CROP ===
                     result_feed = np.zeros((cam_h, cam_w, 3), dtype=np.uint8)
                     fh, fw = rgb_feed.shape[:2]
-                    base_scale = cam_w / float(fw)
+                    # Automatically fit the entire webcam feed (even portrait) perfectly into the box
+                    base_scale = min(cam_w / float(fw), cam_h / float(fh))
                     scale_x    = base_scale * state.zoom_factor
                     scale_y    = base_scale * state.zoom_factor * state.stretch_factor
                     new_w = max(1, int(fw * scale_x))
@@ -317,7 +320,8 @@ def main():
                     paste_x1 = max(0, start_x);   paste_y1 = max(0, start_y)
                     paste_x2 = paste_x1 + (crop_x2 - crop_x1)
                     paste_y2 = paste_y1 + (crop_y2 - crop_y1)
-                    result_feed[paste_y1:paste_y2, paste_x1:paste_x2] = scaled[crop_y1:crop_y2, crop_x1:crop_x2]
+                    if crop_y2 > crop_y1 and crop_x2 > crop_x1 and paste_y2 > paste_y1 and paste_x2 > paste_x1:
+                        result_feed[paste_y1:paste_y2, paste_x1:paste_x2] = scaled[crop_y1:crop_y2, crop_x1:crop_x2]
 
                     # Send to virtual cam without blocking display — skip if cam is behind
                     try:
@@ -333,6 +337,7 @@ def main():
 
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q'):
+                    save_settings(state)
                     return # Exit the entire program
                 elif key == ord('m'):
                     state.face_mesh_mode = (state.face_mesh_mode + 1) % 6
@@ -364,18 +369,24 @@ def main():
                 elif key == ord('='):
                     state.zoom_factor += 0.05
                     print(f"[CALIBRATION] Zoom In: {state.zoom_factor:.2f}")
+                    save_settings(state)
                 elif key == ord('-'):
                     state.zoom_factor = max(0.1, state.zoom_factor - 0.05)
                     print(f"[CALIBRATION] Zoom Out: {state.zoom_factor:.2f}")
+                    save_settings(state)
                 elif key == ord(']'):
                     state.stretch_factor += 0.05
                     print(f"[CALIBRATION] Taller: {state.stretch_factor:.2f}")
+                    save_settings(state)
                 elif key == ord('['):
                     state.stretch_factor = max(0.1, state.stretch_factor - 0.05)
                     print(f"[CALIBRATION] Wider: {state.stretch_factor:.2f}")
+                    save_settings(state)
                 elif key == ord('b'):
                     state.gesture_calibration_mode = not state.gesture_calibration_mode
                     print(f"[CALIBRATION] Gesture Calibration Mode: {'ON' if state.gesture_calibration_mode else 'OFF'}")
+                    if not state.gesture_calibration_mode:
+                        save_settings(state)
                 elif key == ord('i'):
                     state.bg_frame = image.copy()
                     state.invis_mode = not state.invis_mode
@@ -425,6 +436,7 @@ def main():
                         print("\n[TARGET WINDOW] Switched to: Full Desktop Monitor")
                     else:
                         print(f"\n[TARGET WINDOW] Switched to ({state.target_window_index+1}/{count}): {title}")
+                    save_settings(state)
                 elif key == ord('s'):
                     bbox, title, count = get_target_window_rect(state.target_window_index)
                     

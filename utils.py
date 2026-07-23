@@ -6,6 +6,8 @@ import psutil
 import cv2
 import math
 import numpy as np
+import json
+import os
 
 from config import *
 
@@ -52,6 +54,33 @@ def smooth(key, target_val, state, speed=0.5):
     else:
         state.smooth_cache[key] += (target_val - state.smooth_cache[key]) * speed
     return state.smooth_cache[key]
+
+def load_settings(state):
+    """Loads saved zoom and window settings from disk so they persist across restarts."""
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prism_config.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r") as f:
+                data = json.load(f)
+                state.stretch_factor = data.get("stretch_factor", 1.0)
+                state.zoom_factor = data.get("zoom_factor", 1.8)
+                state.target_window_index = data.get("target_window_index", 0)
+        except Exception:
+            pass
+
+def save_settings(state):
+    """Saves the current zoom and window settings to disk."""
+    try:
+        data = {
+            "stretch_factor": float(round(state.stretch_factor, 3)),
+            "zoom_factor": float(round(state.zoom_factor, 3)),
+            "target_window_index": int(state.target_window_index)
+        }
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prism_config.json")
+        with open(config_path, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"[WARNING] Failed to save settings: {e}")
 
 class OneEuroFilter:
     def __init__(self, t0, x0, min_cutoff=0.004, beta=0.7, d_cutoff=1.0):
