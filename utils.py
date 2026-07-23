@@ -102,9 +102,9 @@ def apply_tracking_smoothing(face_landmarks_list, hand_landmarks_list, hand_hand
                 raw_pts[i, 2] = lm.z
                 
         face_width = raw_pts[:, 0].max() - raw_pts[:, 0].min() if len(raw_pts) > 0 else 0.1
-        # Dynamic tuning: beta is balanced to reduce lag but prevent raw jitter
-        dyn_beta = 60.0 + max(0.0, (0.15 - face_width) * 50.0)
-        dyn_min_cutoff = 0.004 + min(0.01, face_width * 0.05)
+        # Dynamic tuning: Heavily favor smoothness
+        dyn_beta = 10.0 + max(0.0, (0.15 - face_width) * 15.0)
+        dyn_min_cutoff = 0.0005 + min(0.005, face_width * 0.02)
             
         if face_idx not in state.face_smooth_cache or state.face_smooth_cache[face_idx].x_prev.shape != raw_pts.shape:
             state.face_smooth_cache[face_idx] = OneEuroFilter(t, raw_pts, min_cutoff=dyn_min_cutoff, beta=dyn_beta)
@@ -132,12 +132,12 @@ def apply_tracking_smoothing(face_landmarks_list, hand_landmarks_list, hand_hand
                 raw_pts[i, 1] = lm.y
                 raw_pts[i, 2] = lm.z
                 
-        # Dynamic hand tuning
+        # Dynamic hand tuning: Much smoother
         hand_width = raw_pts[:, 0].max() - raw_pts[:, 0].min() if len(raw_pts) > 0 else 0.1
-        dyn_beta = 30.0 + max(0.0, (0.1 - hand_width) * 50.0)
+        dyn_beta = 5.0 + max(0.0, (0.1 - hand_width) * 10.0)
             
         if hand_id not in state.hand_smooth_caches or state.hand_smooth_caches[hand_id].x_prev.shape != raw_pts.shape:
-            state.hand_smooth_caches[hand_id] = OneEuroFilter(t, raw_pts, min_cutoff=0.004, beta=dyn_beta)
+            state.hand_smooth_caches[hand_id] = OneEuroFilter(t, raw_pts, min_cutoff=0.001, beta=dyn_beta)
         else:
             state.hand_smooth_caches[hand_id].beta = dyn_beta
             filtered_pts = state.hand_smooth_caches[hand_id](t, raw_pts)
@@ -163,7 +163,7 @@ def apply_tracking_smoothing(face_landmarks_list, hand_landmarks_list, hand_hand
                 raw_pts[i, 2] = lm.z
             
         if pose_idx not in state.pose_smooth_cache or state.pose_smooth_cache[pose_idx].x_prev.shape != raw_pts.shape:
-            state.pose_smooth_cache[pose_idx] = OneEuroFilter(t, raw_pts, min_cutoff=0.004, beta=25.0)
+            state.pose_smooth_cache[pose_idx] = OneEuroFilter(t, raw_pts, min_cutoff=0.001, beta=10.0)
         else:
             filtered_pts = state.pose_smooth_cache[pose_idx](t, raw_pts)
             for i, lm in enumerate(pose_landmarks):

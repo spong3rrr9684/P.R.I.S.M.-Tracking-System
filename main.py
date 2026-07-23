@@ -295,8 +295,11 @@ def main():
                     if state.gesture_calibration_mode and len(last_hands) >= 2:
                         dx = abs(last_hands[0][8].x - last_hands[1][8].x)
                         dy = abs(last_hands[0][8].y - last_hands[1][8].y)
-                        state.stretch_factor = max(0.2, min(5.0, dx * 3.0))
-                        state.zoom_factor    = max(0.2, min(5.0, dy * 3.0))
+                        target_stretch = max(0.2, min(5.0, dx * 3.0))
+                        target_zoom    = max(0.2, min(5.0, dy * 3.0))
+                        # Exponential smoothing for buttery calibration
+                        state.stretch_factor += (target_stretch - state.stretch_factor) * 0.1
+                        state.zoom_factor    += (target_zoom - state.zoom_factor) * 0.1
 
                     # === DYNAMIC CALIBRATION CROP ===
                     result_feed = np.zeros((cam_h, cam_w, 3), dtype=np.uint8)
