@@ -169,36 +169,37 @@ def apply_tracking_smoothing(face_landmarks_list, hand_landmarks_list, hand_hand
             for i, lm in enumerate(pose_landmarks):
                 lm.x, lm.y, lm.z = filtered_pts[i, 0], filtered_pts[i, 1], filtered_pts[i, 2]
 
-def get_browser_rect(target_titles=None):
-    if target_titles is None:
-        target_titles = ["opera", "chrome", "edge", "firefox"]
-        
+def get_open_windows():
     user32 = ctypes.windll.user32
     EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-    found_hwnd = None
+    windows = []
     
     def foreach_window(hwnd, lParam):
-        nonlocal found_hwnd
         if user32.IsWindowVisible(hwnd):
             length = user32.GetWindowTextLengthW(hwnd)
             if length > 0:
                 buf = ctypes.create_unicode_buffer(length + 1)
                 user32.GetWindowTextW(hwnd, buf, length + 1)
-                title = buf.value.lower()
-                if any(target in title for target in target_titles):
-                    # Filter out tiny/hidden browser overlays by checking size
-                    rect = wintypes.RECT()
-                    user32.GetWindowRect(hwnd, ctypes.byref(rect))
-                    if (rect.right - rect.left) > 400 and (rect.bottom - rect.top) > 400:
-                        found_hwnd = hwnd
-                        return False
+                title = buf.value
+                rect = wintypes.RECT()
+                user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                # Filter out tiny overlays/tooltips
+                if (rect.right - rect.left) > 400 and (rect.bottom - rect.top) > 400:
+                    windows.append({"hwnd": hwnd, "title": title, "rect": rect})
         return True
-    
+        
     user32.EnumWindows(EnumWindowsProc(foreach_window), 0)
+    return windows
+
+def get_target_window_rect(target_idx=0):
+    windows = get_open_windows()
+    if not windows:
+        return None, None, 0
+        
+    idx = target_idx % len(windows)
+    target = windows[idx]
+    rect = target["rect"]
     
-    if found_hwnd:
-        rect = wintypes.RECT()
-        user32.GetWindowRect(found_hwnd, ctypes.byref(rect))
-        if rect.left >= -10000 and rect.top >= -10000:
-            return {"top": rect.top, "left": rect.left, "width": rect.right - rect.left, "height": rect.bottom - rect.top}
-    return None
+    if rect.left >= -10000 and rect.top >= -10000:
+        return {"top": rect.top, "left": rect.left, "width": rect.right - rect.left, "height": rect.bottom - rect.top}, target["title"], len(windows)
+    return None, None, len(windows)

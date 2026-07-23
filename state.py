@@ -8,6 +8,7 @@ class HUDState:
     # Tracking config
     tracking_mode: int = 0  # 0: All, 1: Face+Hands, 2: Face Only, 3: Hands Only, 4: Arms Only
     face_mesh_mode: int = 0  # 0: Thinned, 1: Full 3D, 2: Minimal, 3: Point Cloud, 4: Shield, 5: Tactical Red
+    target_window_index: int = 0
     
     # Render config
     show_side_panels: bool = False
@@ -65,6 +66,12 @@ class HUDState:
     hand_raw_bufs: Dict[str, Any] = field(default_factory=dict)
     hand_pts_bufs: Dict[str, Any] = field(default_factory=dict)
     
+    sys_stats: Dict[str, Any] = field(default_factory=dict)
+    sys_stats_time: float = 0
+    cpu_history_buffer: List[float] = field(default_factory=list)
+    real_process_list: List[str] = field(default_factory=list)
+    process_update_time: float = 0
+
     def allocate_buffers(self, w: int, h: int, c: int = 3):
         quarter_w, quarter_h = w // 4, h // 4
         
@@ -84,12 +91,6 @@ class HUDState:
             self.face_raw_buf = np.zeros((478, 3), dtype=np.float32)
         if self.face_pts_buf is None:
             self.face_pts_buf = np.zeros((478, 2), dtype=np.int32)
-
-    sys_stats: Dict[str, Any] = field(default_factory=dict)
-    sys_stats_time: float = 0
-    cpu_history_buffer: List[float] = field(default_factory=list)
-    real_process_list: List[str] = field(default_factory=list)
-    process_update_time: float = 0
     
     # Threading controls
     inference_running: bool = False
