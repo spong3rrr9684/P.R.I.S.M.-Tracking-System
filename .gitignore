@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.env
+crash_log.txt
+log.txt
+
+# Runtime-generated files
+empty_room_ref.jpg
+prism_config.json
+
+# Large AI model files (downloaded by RUN_PRISM.bat)
+*.task
+*.tflite

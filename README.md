@@ -18,12 +18,13 @@ P.R.I.S.M. is a highly modular, real-time computer vision pipeline that overlays
 4. **Surgical Edith** (White minimal, high-contrast)
 5. **Infra-Thermal** (Predator heat-vision style)
 6. **Ultron Void** (Purple glitch/malice aesthetics)
+7. **Faceless Void** (Active camouflage cloak that replaces your face with the background)
 
 ## 🛠️ Project Structure
 * `main.py`: The entry point. Handles the camera loop, virtual camera streaming, and keystrokes.
 * `renderer.py`: The core rendering engine for the HUDs, overlays, animations, and post-processing.
 * `tracker.py`: Houses the MediaPipe Task APIs in a dedicated, blocking thread.
-* `hud_modes.py`: Defines the visual aesthetic instructions (Strategy Pattern) for the 6 different HUD modes.
+* `hud_modes.py`: Defines the visual aesthetic instructions (Strategy Pattern) for the 7 different HUD modes.
 * `ui_components.py`: Contains the raw geometry drawing logic for side-panels, crosshairs, and data bars.
 * `state.py`: Global dataclass defining the memory pools and tracking coordinates.
 * `utils.py`: Contains the 1-Euro Filter logic, matrix scaling, and system telemetry gathering.
@@ -38,6 +39,8 @@ P.R.I.S.M. is a highly modular, real-time computer vision pipeline that overlays
 | `h` | Toggle side data panels |
 | `s` | Dynamically crop a desktop window onto the screen |
 | `n` | Manually trigger "Suit Up" deployment animation |
+| `a` | Toggle AI Cameraman (Center Stage Auto-Framing) |
+| `r` / `p` / `i` | Capture & save a picture of the empty room (`empty_room_ref.jpg`) for the Faceless Void cloak |
 | `x` | Spawn holographic palm UI |
 | `b` | Toggle Gesture Calibration Mode |
 | `f` | Reset to Full Screen |
