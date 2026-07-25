@@ -13,32 +13,32 @@ from config import *
 
 def get_system_stats(t, state):
     """Get real system stats, cached to avoid calling psutil every frame."""
-    if t - state.sys_stats_time > SYS_STATS_INTERVAL:
-        state.sys_stats_time = t
-        cpu = psutil.cpu_percent(interval=0)
-        mem = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
-        net = psutil.net_io_counters()
-        state.sys_stats = {
-            'cpu': cpu,
-            'mem_pct': mem.percent,
-            'mem_used_gb': mem.used / (1024**3),
-            'mem_total_gb': mem.total / (1024**3),
-            'disk_pct': disk.percent,
-            'net_sent': net.bytes_sent,
-            'net_recv': net.bytes_recv,
-            'num_procs': len(psutil.pids()),
-        }
-    
     if t - state.process_update_time > 2.0:
         state.process_update_time = t
         
         def update_procs_bg(s):
             try:
+                # Fetch hardware metrics async
+                cpu = psutil.cpu_percent(interval=0)
+                mem = psutil.virtual_memory()
+                disk = psutil.disk_usage('/')
+                net = psutil.net_io_counters()
+                
                 # Grab all process names uniquely
                 procs = [p.info['name'] for p in psutil.process_iter(['name']) if p.info['name']]
                 unique_procs = list(set(procs))
                 unique_procs = [p for p in unique_procs if not p.startswith("svchost") and not p.startswith("System")]
+                
+                s.sys_stats = {
+                    'cpu': cpu,
+                    'mem_pct': mem.percent,
+                    'mem_used_gb': mem.used / (1024**3),
+                    'mem_total_gb': mem.total / (1024**3),
+                    'disk_pct': disk.percent,
+                    'net_sent': net.bytes_sent,
+                    'net_recv': net.bytes_recv,
+                    'num_procs': len(psutil.pids()),
+                }
                 s.real_process_list = sorted(unique_procs)[:50]
             except psutil.Error:
                 pass
@@ -232,3 +232,53 @@ def get_target_window_rect(target_idx=0):
     if rect.left >= -10000 and rect.top >= -10000:
         return {"top": rect.top, "left": rect.left, "width": rect.right - rect.left, "height": rect.bottom - rect.top}, target["title"], len(windows)
     return None, None, len(windows)
+
+def get_music_peak(state):
+    """Gets real-time Windows system audio peak volume (e.g. YouTube/Spotify in Google Chrome)."""
+    try:
+        if not hasattr(state, '_audio_meter') or state._audio_meter is None:
+            import ctypes, comtypes, comtypes.client
+            from comtypes import GUID, IUnknown, COMMETHOD
+            
+            class IMMDevice(IUnknown):
+                _iid_ = GUID('{D666063F-1587-4E43-81F1-B948E807363F}')
+                _methods_ = [
+                    COMMETHOD([], ctypes.HRESULT, 'Activate',
+                              (['in'], ctypes.POINTER(GUID), 'iid'),
+                              (['in'], ctypes.c_uint32, 'dwClsCtx'),
+                              (['in'], ctypes.POINTER(ctypes.c_uint32), 'pActivationParams'),
+                              (['out', 'retval'], ctypes.POINTER(ctypes.POINTER(IUnknown)), 'ppInterface')),
+                ]
+
+            class IMMDeviceEnumerator(IUnknown):
+                _iid_ = GUID('{A95664D2-9614-4F35-A746-DE8DB63617E6}')
+                _methods_ = [
+                    COMMETHOD([], ctypes.HRESULT, 'EnumAudioEndpoints'),
+                    COMMETHOD([], ctypes.HRESULT, 'GetDefaultAudioEndpoint',
+                              (['in'], ctypes.c_int, 'dataFlow'),
+                              (['in'], ctypes.c_int, 'role'),
+                              (['out', 'retval'], ctypes.POINTER(ctypes.POINTER(IMMDevice)), 'ppEndpoint')),
+                ]
+
+            class IAudioMeterInformation(IUnknown):
+                _iid_ = GUID('{C02216F6-8C67-4B5B-9D00-D008E73E0064}')
+                _methods_ = [
+                    COMMETHOD([], ctypes.HRESULT, 'GetPeakValue',
+                              (['out', 'retval'], ctypes.POINTER(ctypes.c_float), 'pfPeak')),
+                ]
+
+            enum = comtypes.client.CreateObject(GUID('{BCDE0395-E52F-467C-8E3D-C4579291692E}'), interface=IMMDeviceEnumerator)
+            dev = enum.GetDefaultAudioEndpoint(0, 1)
+            state._audio_meter = dev.Activate(IAudioMeterInformation._iid_, comtypes.CLSCTX_ALL, None).QueryInterface(IAudioMeterInformation)
+            
+        peak = state._audio_meter.GetPeakValue()
+        last_peak = getattr(state, 'last_music_peak', 0.0)
+        if peak > last_peak:
+            smoothed_peak = last_peak + (peak - last_peak) * 0.45
+        else:
+            smoothed_peak = last_peak * 0.91
+        state.last_music_peak = smoothed_peak
+        return smoothed_peak
+    except Exception:
+        state.last_music_peak = 0.0
+        return 0.0

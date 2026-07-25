@@ -1,22 +1,26 @@
+import os
+import time
+
+# SET THESE BEFORE IMPORTING CV2 OR NUMPY, OR THEY WILL BE IGNORED.
+# 3 threads leaves plenty of room on your 6-core 5600G for MediaPipe inference.
+os.environ["OMP_NUM_THREADS"] = "3"
+os.environ["OPENBLAS_NUM_THREADS"] = "3"
+os.environ["MKL_NUM_THREADS"] = "3"
+
 import cv2
 cv2.setUseOptimized(True)
-cv2.ocl.setUseOpenCL(False)
-print(f"OpenCL Enabled: {cv2.ocl.haveOpenCL()}")
-import time
-import os
-
-# Crucial CPU optimizations: stop C++ backends from aggressively over-threading
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-cv2.setNumThreads(1)
+# Keep OpenCL OFF to prevent PCIe 3.0 x4 bandwidth choking on your RX 6400
+cv2.ocl.setUseOpenCL(False) 
+cv2.setNumThreads(3)
 
 import mss
 import queue
 import logging
 from voice_assistant import VoiceAssistant
-from renderer import update_file_network_physics
+from renderer import update_file_network_physics, init_file_network
 import threading
+import pyvirtualcam
+import numpy as np
 try:
     from websocket_server import HUDWebSocketServer
 except ImportError:
@@ -56,16 +60,24 @@ class ThreadedCamera:
 
     def update(self):
         while self.running:
-            if self.cap.isOpened():
-                ret, frame = self.cap.read()
-                if ret:
-                    self.ret = ret
-                    self.frame = frame
-            else:
-                time.sleep(0.01)
+            try:
+                if self.cap.isOpened():
+                    ret, frame = self.cap.read()
+                    if ret:
+                        self.ret = ret
+                        self.frame = frame
+                    else:
+                        logger.warning(f"Camera {self.cam_index} frame dropped. Hardware disconnect?")
+                        time.sleep(0.1)
+                else:
+                    time.sleep(0.01)
+            except Exception as e:
+                logger.error(f"ThreadedCamera capture loop exception: {e}", exc_info=True)
+                self.ret = False
+                time.sleep(0.1)
 
     def read(self):
-        return self.ret, (self.frame.copy() if self.frame is not None else None)
+        return self.ret, self.frame
 
     def isOpened(self):
         return self.cap.isOpened() and self.running
@@ -74,7 +86,8 @@ class ThreadedCamera:
         self.running = False
         if hasattr(self, 'thread'):
             self.thread.join(timeout=1.0)
-        self.source_mgr.release()
+        if hasattr(self, 'cap') and self.cap is not None and self.cap.isOpened():
+            self.cap.release()
 
 class ThreadedScreenCapture:
     def __init__(self, bbox=None):
@@ -88,19 +101,22 @@ class ThreadedScreenCapture:
         self.thread.start()
         
     def update(self):
-        import time
-        import numpy as np
+        import mss.exception
         while self.running:
             try:
                 sct_img = self.sct.grab(self.bbox)
                 self.frame = np.array(sct_img)[:, :, :3]
                 self.ret = True
-            except Exception:
+            except mss.exception.ScreenShotError as e:
+                logger.error(f"Screen capture disconnected or resized: {e}", exc_info=True)
+                self.ret = False
+            except Exception as e:
+                logger.error(f"Screen capture failed: {e}", exc_info=True)
                 self.ret = False
             time.sleep(1/30.0)
             
     def read(self):
-        return self.ret, (self.frame.copy() if self.frame is not None else None)
+        return self.ret, self.frame
         
     def isOpened(self):
         return self.running
@@ -109,6 +125,11 @@ class ThreadedScreenCapture:
         self.running = False
         if hasattr(self, 'thread'):
             self.thread.join(timeout=1.0)
+        if hasattr(self, 'sct') and self.sct is not None:
+            try:
+                self.sct.close()
+            except Exception:
+                pass
 
 class VideoSourceManager:
     def __init__(self, primary_cam_idx):
@@ -126,14 +147,18 @@ class VideoSourceManager:
     def switch_to_window(self):
         self.source.release()
         from utils import get_open_windows
-        self.window_list = get_open_windows()
-        if len(self.window_list) > 0:
-            self.window_idx = (self.window_idx + 1) % len(self.window_list)
-            win = self.window_list[self.window_idx]
-            self.source = ThreadedScreenCapture(bbox=win['bbox'])
-            self.mode = f"WINDOW: {win['title'][:15]}"
-            print(f"[SOURCE] Switched to Window: {win['title']}")
-        else:
+        try:
+            self.window_list = get_open_windows()
+            if len(self.window_list) > 0:
+                self.window_idx = (self.window_idx + 1) % len(self.window_list)
+                win = self.window_list[self.window_idx]
+                self.source = ThreadedScreenCapture(bbox=win['bbox'])
+                self.mode = f"WINDOW: {win['title'][:15]}"
+                print(f"[SOURCE] Switched to Window: {win['title']}")
+            else:
+                self.switch_to_desktop()
+        except Exception as e:
+            logger.error(f"Failed to enumerate windows: {e}", exc_info=True)
             self.switch_to_desktop()
             
     def switch_to_webcam(self, idx=0):
@@ -155,8 +180,6 @@ from state import HUDState
 from tracker import start_inference_thread
 from renderer import draw_full_hud
 from utils import apply_tracking_smoothing, get_target_window_rect, load_settings, save_settings
-import pyvirtualcam
-import numpy as np
 
 def main():
     print('=' * 50)
@@ -208,8 +231,8 @@ def main():
         try:
             cam_context = pyvirtualcam.Camera(width=canvas_w, height=canvas_h, fps=30, fmt=pyvirtualcam.PixelFormat.RGB)
         except Exception as e:
-            print(f"\n[WARNING] Could not start virtual camera: {e}")
-            print("[WARNING] P.R.I.S.M will run locally, but will not stream to Discord/Zoom.\n")
+            logger.error(f"Could not start virtual camera: {e}", exc_info=True)
+            print("\n[WARNING] P.R.I.S.M will run locally, but will not stream to Discord/Zoom.\n")
             cam_context = DummyCam()
 
         with cam_context as cam:
@@ -220,6 +243,18 @@ def main():
             ws_server = HUDWebSocketServer()
             ws_server.start()
             voice_agent.start()
+            
+            cv2.namedWindow('P.R.I.S.M Tracking')
+            def _on_mouse_click(event, x, y, flags, param):
+                if event == cv2.EVENT_LBUTTONDOWN:
+                    if hasattr(state, '_current_image') and state._current_image is not None:
+                        state.bg_frame = state._current_image.copy()
+                        try:
+                            cv2.imwrite("empty_room_ref.jpg", state.bg_frame)
+                            print("\n[ROOM REFERENCE] 📸 Empty room photo captured via Mouse Click & saved to 'empty_room_ref.jpg'!")
+                        except Exception as e:
+                            print(f"\n[ROOM REFERENCE] Error saving: {e}")
+            cv2.setMouseCallback('P.R.I.S.M Tracking', _on_mouse_click)
             
             cycle_requested = False
             
@@ -232,9 +267,13 @@ def main():
             while source_mgr.isOpened():
                 try:
                     success, image = source_mgr.read()
+                    if image is None:
+                        success = False
                 except Exception as e:
-                    logger.error(f"Failed to read from camera: {e}", exc_info=True)
-                    success = False
+                    logger.error(f"Pipeline capture choked: {e}", exc_info=True)
+                    logger.info("Triggering fallback: Switching to desktop capture to maintain feed.")
+                    source_mgr.switch_to_desktop()
+                    continue
 
                 if not success:
                     time.sleep(0.005)
@@ -248,7 +287,7 @@ def main():
                 h, w = image.shape[:2]
                 small_frame = cv2.resize(image, (int(w * state.ai_scale_factor), int(h * state.ai_scale_factor)), interpolation=cv2.INTER_LINEAR)
                 # Convert BGR to RGB here to save tracker thread time
-                small_rgb = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+                small_rgb = np.ascontiguousarray(cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB))
 
                 # Push freshest downscaled frame to AI thread atomically
                 try:
@@ -304,7 +343,10 @@ def main():
                         state.zoom_factor    += (target_zoom - state.zoom_factor) * 0.1
 
                     # === DYNAMIC CALIBRATION CROP ===
-                    result_feed = np.zeros((cam_h, cam_w, 3), dtype=np.uint8)
+                    if getattr(state, 'virtual_cam_buf', None) is None or state.virtual_cam_buf.shape[:2] != (cam_h, cam_w):
+                        state.virtual_cam_buf = np.zeros((cam_h, cam_w, 3), dtype=np.uint8)
+                    result_feed = state.virtual_cam_buf
+                    result_feed.fill(0)
                     fh, fw = rgb_feed.shape[:2]
                     # Automatically fit the entire webcam feed (even portrait) perfectly into the box
                     base_scale = min(cam_w / float(fw), cam_h / float(fh))
@@ -333,6 +375,7 @@ def main():
                     except Exception as e:
                         logger.error(f"Virtual camera send failed/dropped: {e}", exc_info=True)
 
+                state._current_image = image
                 cv2.imshow('P.R.I.S.M Tracking', flipped_image)
 
                 key = cv2.waitKey(1) & 0xFF
@@ -340,7 +383,7 @@ def main():
                     save_settings(state)
                     return # Exit the entire program
                 elif key == ord('m'):
-                    state.face_mesh_mode = (state.face_mesh_mode + 1) % 6
+                    state.face_mesh_mode = (state.face_mesh_mode + 1) % 7
 
                 elif key == ord('h'):
                     state.show_side_panels = not state.show_side_panels
@@ -387,10 +430,19 @@ def main():
                     print(f"[CALIBRATION] Gesture Calibration Mode: {'ON' if state.gesture_calibration_mode else 'OFF'}")
                     if not state.gesture_calibration_mode:
                         save_settings(state)
-                elif key == ord('i'):
+                elif key in [ord('i'), ord('r'), ord('p')]:
                     state.bg_frame = image.copy()
-                    state.invis_mode = not state.invis_mode
-                    print(f"[INVISIBILITY CLOAK] {'ACTIVATED' if state.invis_mode else 'DEACTIVATED'}")
+                    try:
+                        cv2.imwrite("empty_room_ref.jpg", state.bg_frame)
+                        print("\n[ROOM REFERENCE] 📸 Empty room photo captured & saved to 'empty_room_ref.jpg'!")
+                    except Exception as e:
+                        print(f"\n[ROOM REFERENCE] Error saving photo: {e}")
+                    if key == ord('i'):
+                        state.invis_mode = not state.invis_mode
+                        print(f"[INVISIBILITY CLOAK] {'ACTIVATED' if state.invis_mode else 'DEACTIVATED'}")
+                elif key == ord('a'):
+                    state.cameraman_active = not getattr(state, 'cameraman_active', False)
+                    print(f"[AI CAMERAMAN] {'ACTIVATED' if state.cameraman_active else 'DEACTIVATED'}")
 
                 # Process Voice Commands
                 if hasattr(state, "voice_command_queue") and state.voice_command_queue:
@@ -404,6 +456,16 @@ def main():
                             state.tracking_mode = track_idx
                         elif cmd == "toggle_hud":
                             state.show_side_panels = not state.show_side_panels
+                        elif cmd == "toggle_cameraman":
+                            state.cameraman_active = not getattr(state, 'cameraman_active', False)
+                            print(f"[AI CAMERAMAN] {'ACTIVATED' if state.cameraman_active else 'DEACTIVATED'}")
+                        elif cmd == "save_room":
+                            state.bg_frame = image.copy()
+                            try:
+                                cv2.imwrite("empty_room_ref.jpg", state.bg_frame)
+                                print("\n[ROOM REFERENCE] 📸 Empty room photo captured via Voice & saved to 'empty_room_ref.jpg'!")
+                            except Exception as e:
+                                print(f"\n[ROOM REFERENCE] Error saving photo: {e}")
                         elif cmd == "suit_up":
                             if state.suit_up_complete:
                                 state.is_retracting = True

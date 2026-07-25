@@ -1,92 +1,46 @@
 from hud_modes import MODES
-
-from mediapipe.tasks.python.vision import FaceLandmarksConnections
+from mediapipe.tasks.python.vision import FaceLandmarksConnections, HandLandmarksConnections
 
 try:
-
     from ar_hologram import render_palm_hologram
-
 except ImportError:
-
     def render_palm_hologram(*args, **kwargs): pass
 
 import logging
-
 import os
-
 import random
-
-from ui_components import *
-
-import cv2
-
-import numpy as np
-
 import math
-
-import psutil
-
 import time
-
 import time as _t
-
 import threading
-
 import itertools
-
 import mss
 
-import random
+import cv2
+import numpy as np
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+from ui_components import *
 from utils import *
 
-
-
 # === Precomputed vectorized edges ===
-
-from mediapipe.tasks.python.vision import FaceLandmarksConnections, HandLandmarksConnections
-
 _face_tess_edges = np.array([[c.start, c.end] for c in FaceLandmarksConnections.FACE_LANDMARKS_TESSELATION], dtype=np.int32)
-
 _face_contour_edges = np.array([[c.start, c.end] for c in FaceLandmarksConnections.FACE_LANDMARKS_CONTOURS], dtype=np.int32)
 
 _base_hand = [[c.start, c.end] for c in HandLandmarksConnections.HAND_CONNECTIONS]
-
 _extra_hand = [[1, 5], [2, 5], [5, 13], [5, 17], [9, 17], [1, 17], [0, 9], [0, 13], [9, 13], [13, 17]]
-
 _hand_edges = np.array(_base_hand + _extra_hand, dtype=np.int32)
 
-
-
 _last_hud_t = 0
-
 _current_fps = 30
-
 FACE_PERSIST_SECONDS = 1.5
 
 
 
 
 
-def render_face_tracking(overlay, active_face_list, w, h, t, state):
+
+
+def render_face_tracking(overlay, active_face_list, w, h, t, state, image=None):
 
 
 
@@ -127,7 +81,30 @@ def render_face_tracking(overlay, active_face_list, w, h, t, state):
 
         strategy = MODES.get(mode, MODES[0])
 
-        CC, TAG = strategy.render(overlay, face_landmarks, w, h, t, pts, nose, lines, dist, state)
+        CC, TAG = strategy.render(overlay, face_landmarks, w, h, t, pts, nose, lines, dist, state, image=image)
+
+        if mode == 6 or "FACELESS" in TAG:
+            xs = pts[:,0]; ys_all = pts[:,1]
+            min_x = int(xs.min() - (xs.max()-xs.min())*0.10)
+            max_x = int(xs.max() + (xs.max()-xs.min())*0.10)
+            min_y = int(ys_all.min() - (ys_all.max()-ys_all.min())*0.25)
+            max_y = int(ys_all.max() + (ys_all.max()-ys_all.min())*0.10)
+
+            # Minimal stealth HUD brackets
+            draw_hud_brackets(overlay, min_x, min_y, max_x, max_y, CC, 1)
+
+            # Animated TAG widget
+            tx, ty = min_x+4, min_y+16
+            tsz = cv2.getTextSize(TAG, cv2.FONT_HERSHEY_SIMPLEX, 0.38, 1)[0]
+            cv2.rectangle(overlay, (tx-3, ty-12), (tx+tsz[0]+4, ty+3), (3, 3, 8), -1)
+            blink = (int(t * 4) % 2 == 0)
+            border_col = CC if blink else (CC[0]//2, CC[1]//2, CC[2]//2)
+            cv2.rectangle(overlay, (tx-3, ty-12), (tx+tsz[0]+4, ty+3), border_col, 1)
+            cv2.putText(overlay, TAG, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.38, CC, 1, cv2.LINE_AA)
+            dot_col = CC if blink else (CC[0]//3, CC[1]//3, CC[2]//3)
+            cv2.circle(overlay, (tx-3+tsz[0]+10, ty-5), 3, dot_col, -1, cv2.LINE_AA)
+
+            return min_y
 
 
 
@@ -1099,6 +1076,81 @@ def render_ui_panels(image, overlay, h, w, t, face_detected, face_min_y, state):
 
 
 
+def apply_ai_cameraman(image, face_landmarks_list, hand_landmarks_list, t, state):
+    if not getattr(state, 'cameraman_active', False):
+        return image
+        
+    h, w = image.shape[:2]
+    
+    # Calculate target bounding box and eye-level focus anchor solely from face landmarks
+    # (Ignoring hands so putting hands in the air never pulls the camera away from your face/eyes!)
+    points = []
+    eye_points = []
+    if face_landmarks_list and len(face_landmarks_list) > 0:
+        fl = face_landmarks_list[0]
+        for i, lm in enumerate(fl):
+            points.append((lm.x, lm.y))
+            # Landmark indices for eyes and nose bridge (center of gaze)
+            if i in (33, 133, 263, 362, 168, 6, 1, 4, 197, 2, 5, 10):
+                eye_points.append((lm.x, lm.y))
+                
+    if points:
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        box_h = max_y - min_y
+        
+        if eye_points:
+            target_cx = sum(p[0] for p in eye_points) / len(eye_points)
+            target_cy = sum(p[1] for p in eye_points) / len(eye_points)
+        else:
+            target_cx = (min_x + max_x) / 2.0
+            target_cy = (min_y + max_y) / 2.0
+        
+        # Gentle framing: cap zoom much lower so it doesn't zoom in too much
+        desired_zoom = min(1.30, max(1.0, 0.26 / max(0.20, box_h)))
+    else:
+        target_cx, target_cy = 0.5, 0.5
+        desired_zoom = 1.0
+        
+    # Fast, responsive damping: move much quicker so you can move fast and it keeps up immediately!
+    dist = math.hypot(target_cx - getattr(state, 'cameraman_cx', 0.5), target_cy - getattr(state, 'cameraman_cy', 0.5))
+    pan_alpha = min(0.50, 0.22 + dist * 1.8) # 22% base speed, up to 50% per frame on fast moves!
+    zoom_alpha = 0.18
+    
+    state.cameraman_cx += (target_cx - getattr(state, 'cameraman_cx', 0.5)) * pan_alpha
+    state.cameraman_cy += (target_cy - getattr(state, 'cameraman_cy', 0.5)) * pan_alpha
+    state.cameraman_zoom += (desired_zoom - getattr(state, 'cameraman_zoom', 1.0)) * zoom_alpha
+    
+    cur_zoom = state.cameraman_zoom
+    cur_cx = state.cameraman_cx
+    cur_cy = state.cameraman_cy
+    
+    view_w = int(w / cur_zoom)
+    view_h = int(h / cur_zoom)
+    
+    x1 = int(cur_cx * w - view_w / 2.0)
+    y1 = int(cur_cy * h - view_h / 2.0)
+    
+    x1 = max(0, min(w - view_w, x1))
+    y1 = max(0, min(h - view_h, y1))
+    x2 = x1 + view_w
+    y2 = y1 + view_h
+    
+    if x2 > x1 and y2 > y1:
+        cropped = image[y1:y2, x1:x2]
+        image = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+        
+    # Cinematic HUD indicator
+    cv2.rectangle(image, (20, h - 55), (340, h - 20), (0, 0, 0), -1)
+    cv2.rectangle(image, (20, h - 55), (340, h - 20), (0, 255, 255), 1)
+    cv2.putText(image, f"AI CAMERAMAN // ACTIVE", (30, h - 38), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(image, f"ZOOM: {cur_zoom:.2f}X | PAN: ({cur_cx:.2f}, {cur_cy:.2f})", (30, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1, cv2.LINE_AA)
+    
+    return image
+
+
 def apply_post_processing(image, overlay, t, state):
 
     h, w, c = image.shape
@@ -1160,6 +1212,7 @@ def draw_full_hud(image, face_landmarks_list, hand_landmarks_list, hand_handedne
 
 
     h, w, c = image.shape
+    music_peak = get_music_peak(state)
 
 
     # === MEMORY OPTIMIZATION: Recycle the same array instead of allocating 3MB every frame ===
@@ -1238,13 +1291,16 @@ def draw_full_hud(image, face_landmarks_list, hand_landmarks_list, hand_handedne
 
 
 
+    if not face_detected and len(face_landmarks_list) == 0 and image is not None:
+        state.bg_frame = image.copy()
+
     face_min_y = None
 
     if state.suit_up_complete or state.is_deploying:
 
         if face_detected and state.tracking_mode in [0, 1, 2]:
 
-            face_min_y = render_face_tracking(overlay, active_face_list, w, h, t, state)
+            face_min_y = render_face_tracking(overlay, active_face_list, w, h, t, state, image=image)
 
 
         if hand_landmarks_list and state.tracking_mode in [0, 1, 3]:
@@ -1303,8 +1359,12 @@ def draw_full_hud(image, face_landmarks_list, hand_landmarks_list, hand_handedne
     CYAN_BRIGHT = (255, 255, 0)
 
     nano_x, nano_y, nano_w, nano_h = w - 180, 20, 160, 50
+    room_x, room_y, room_w, room_h = w - 180, 80, 160, 50
+    cam_x, cam_y, cam_w, cam_h = w - 180, 140, 160, 50
 
     nano_color = CYAN_DIM
+    room_color = CYAN_DIM
+    cam_color = CYAN_BRIGHT if getattr(state, 'cameraman_active', False) else CYAN_DIM
 
 
     for hl in hand_landmarks_list:
@@ -1340,11 +1400,37 @@ def draw_full_hud(image, face_landmarks_list, hand_landmarks_list, hand_handedne
 
                 state.deploy_start_time = t
 
+        # Check Save Room
+        if room_x < ix < room_x + room_w and room_y < iy < room_y + room_h:
+            room_color = CYAN_BRIGHT
+            if t - getattr(state, 'last_room_save_time', 0) > 2.0:
+                state.last_room_save_time = t
+                if image is not None:
+                    state.bg_frame = image.copy()
+                    try:
+                        cv2.imwrite("empty_room_ref.jpg", state.bg_frame)
+                        print("\n[ROOM REFERENCE] 📸 Empty room background saved to 'empty_room_ref.jpg' via HUD Button!")
+                    except Exception as e:
+                        print(f"\n[ROOM REFERENCE] Error saving: {e}")
+
+        # Check AI Cameraman Toggle
+        if cam_x < ix < cam_x + cam_w and cam_y < iy < cam_y + cam_h:
+            cam_color = CYAN_BRIGHT
+            if t - getattr(state, 'last_cameraman_toggle_time', 0) > 1.5:
+                state.last_cameraman_toggle_time = t
+                state.cameraman_active = not getattr(state, 'cameraman_active', False)
+                print(f"[AI CAMERAMAN] {'ACTIVATED' if state.cameraman_active else 'DEACTIVATED'}")
+
 
 
     cv2.rectangle(overlay, (nano_x, nano_y), (nano_x + nano_w, nano_y + nano_h), nano_color, 2)
 
     cv2.putText(overlay, f"SUIT UP [N]", (nano_x + 15, nano_y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, nano_color, 1, cv2.LINE_AA)
+    cv2.rectangle(overlay, (room_x, room_y), (room_x + room_w, room_y + room_h), room_color, 2)
+    cv2.putText(overlay, "SAVE ROOM [R]", (room_x + 12, room_y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.48, room_color, 1, cv2.LINE_AA)
+    cv2.rectangle(overlay, (cam_x, cam_y), (cam_x + cam_w, cam_y + cam_h), cam_color, 2)
+    label_text = "CAMERAMAN: ON" if getattr(state, 'cameraman_active', False) else "CAMERAMAN [A]"
+    cv2.putText(overlay, label_text, (cam_x + 10, cam_y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.45, cam_color, 1, cv2.LINE_AA)
 
 
 
@@ -1553,13 +1639,13 @@ def draw_full_hud(image, face_landmarks_list, hand_landmarks_list, hand_handedne
 
             cv2.rectangle(overlay, (stx-2, sty-2), (sbx+2, sby+2), MID,   2)
 
-            # Layer 3: bright core line — animated pulse
+            # Layer 3: bright core line — animated pulse + music beat
 
-            pulse = 0.7 + 0.3 * abs(math.sin(t * 1.8))
+            pulse = min(1.0, 0.7 + 0.3 * abs(math.sin(t * 1.8)) + music_peak * 0.8)
 
             core_col = (int(CORE[0]*pulse), int(CORE[1]*pulse), int(CORE[2]*pulse))
 
-            cv2.rectangle(overlay, (stx, sty), (sbx, sby), core_col, 1)
+            cv2.rectangle(overlay, (stx, sty), (sbx, sby), core_col, 1 + int(music_peak * 3))
 
 
 
@@ -1649,9 +1735,34 @@ def draw_full_hud(image, face_landmarks_list, hand_landmarks_list, hand_handedne
 
 
 
+    # ── AUDIO CORE MUSIC REACTIVITY EQUALIZER ────────────────────────
+    if music_peak > 0.005:
+        num_bars = 28
+        active_bars = int(music_peak * num_bars * 1.6)
+        active_bars = min(num_bars, active_bars)
+        
+        bar_w = 6
+        bar_gap = 2
+        total_w = num_bars * (bar_w + bar_gap)
+        start_x = (w - total_w) // 2
+        start_y = h - 15
+        
+        cv2.rectangle(overlay, (start_x - 12, start_y - 22), (start_x + total_w + 10, start_y + 8), (10, 10, 15), -1)
+        cv2.rectangle(overlay, (start_x - 12, start_y - 22), (start_x + total_w + 10, start_y + 8), (0, 255, 255), 1)
+        cv2.putText(overlay, f"🎵 SPOTIFY / CHROME AUDIO LINK: {int(min(1.0, music_peak)*100)}%", (start_x - 10, start_y - 26), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1, cv2.LINE_AA)
+        
+        for b in range(num_bars):
+            bx = start_x + b * (bar_w + bar_gap)
+            bh = int(16 * (0.3 + 0.7 * math.sin(t * 10 + b * 0.5) * music_peak)) if b < active_bars else 2
+            b_color = (0, 255, 255) if b < active_bars else (60, 60, 60)
+            if b >= active_bars - 2 and b < active_bars:
+                b_color = (255, 100, 255) # Pink peak tips!
+            cv2.rectangle(overlay, (bx, start_y - bh), (bx + bar_w, start_y), b_color, -1)
+
     render_voice_ui(overlay, w, h, t, state)
 
-    return apply_post_processing(image, overlay, t, state)
+    post_img = apply_post_processing(image, overlay, t, state)
+    return apply_ai_cameraman(post_img, face_landmarks_list, hand_landmarks_list, t, state)
 
 
 

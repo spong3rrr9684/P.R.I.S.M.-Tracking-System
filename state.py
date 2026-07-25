@@ -7,7 +7,7 @@ from typing import Any, List, Dict, Optional, Tuple
 class HUDState:
     # Tracking config
     tracking_mode: int = 0  # 0: All, 1: Face+Hands, 2: Face Only, 3: Hands Only, 4: Arms Only
-    face_mesh_mode: int = 0  # 0: Thinned, 1: Full 3D, 2: Minimal, 3: Point Cloud, 4: Shield, 5: Tactical Red
+    face_mesh_mode: int = 0  # 0: Thinned, 1: Full 3D, 2: Minimal, 3: Point Cloud, 4: Shield, 5: Tactical Red, 6: Faceless Void
     target_window_index: int = 0
     
     # Render config
@@ -32,6 +32,11 @@ class HUDState:
     gesture_calibration_mode: bool = False
     air_draw_points: List[Any] = field(default_factory=list)
     is_drawing: bool = False
+    cameraman_active: bool = False
+    cameraman_cx: float = 0.5
+    cameraman_cy: float = 0.5
+    cameraman_zoom: float = 1.0
+    last_cameraman_toggle_time: float = 0
     
     # Temporal & AI variables
     last_face_landmarks: Any = None
@@ -65,6 +70,7 @@ class HUDState:
     face_pts_buf: Any = None
     hand_raw_bufs: Dict[str, Any] = field(default_factory=dict)
     hand_pts_bufs: Dict[str, Any] = field(default_factory=dict)
+    virtual_cam_buf: Any = None
     
     sys_stats: Dict[str, Any] = field(default_factory=dict)
     sys_stats_time: float = 0
@@ -74,23 +80,38 @@ class HUDState:
 
     def allocate_buffers(self, w: int, h: int, c: int = 3):
         quarter_w, quarter_h = w // 4, h // 4
-        
+            
+        # Switched back to standard zero-allocation numpy arrays. 
+        # Keeps memory local to your Ryzen CPU and avoids the RX 6400 PCIe bottleneck.
         if self.small_cache is None:
-            self.small_cache = cv2.UMat(np.zeros((quarter_h, quarter_w, c), dtype=np.uint8))
+            self.small_cache = np.zeros((quarter_h, quarter_w, c), dtype=np.uint8)
         if self.bloom_up_cache is None:
-            self.bloom_up_cache = cv2.UMat(np.zeros((h, w, c), dtype=np.uint8))
+            self.bloom_up_cache = np.zeros((h, w, c), dtype=np.uint8)
             
         if self.vignette_cache is None:
             vig = np.zeros((h, w), dtype=np.float32)
             cv2.ellipse(vig, (w // 2, h // 2), (int(w * 0.55), int(h * 0.6)), 0, 0, 360, 1.0, -1)
             cv2.GaussianBlur(vig, (101, 101), 0, dst=vig)
             vig_rgb = np.stack([vig, vig, vig], axis=2)
-            self.vignette_cache = cv2.UMat(vig_rgb)
+            self.vignette_cache = vig_rgb
             
         if self.face_raw_buf is None:
             self.face_raw_buf = np.zeros((478, 3), dtype=np.float32)
         if self.face_pts_buf is None:
             self.face_pts_buf = np.zeros((478, 2), dtype=np.int32)
+            
+        if self.bg_frame is None:
+            import os
+            if os.path.exists("empty_room_ref.jpg"):
+                try:
+                    loaded = cv2.imread("empty_room_ref.jpg")
+                    if loaded is not None:
+                        if loaded.shape[:2] != (h, w):
+                            loaded = cv2.resize(loaded, (w, h))
+                        self.bg_frame = loaded
+                        print("[ROOM REFERENCE] Loaded saved empty room background from 'empty_room_ref.jpg'")
+                except Exception as e:
+                    pass
     
     # Threading controls
     inference_running: bool = False
